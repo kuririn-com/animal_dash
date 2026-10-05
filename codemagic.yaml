@@ -17,6 +17,10 @@ workflows:
     scripts:
       - name: Install Flutter dependencies
         script: flutter pub get
+      - name: Check game layout and ad scheduling
+        script: |
+          flutter analyze --no-fatal-infos
+          flutter test
       - name: Install iOS dependencies
         script: |
           cd ios
@@ -28,6 +32,7 @@ workflows:
           LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID")
           BUILD_NUMBER=$(( ${LATEST_BUILD_NUMBER:-0} + 1 ))
           flutter build ipa --release \
+            --dart-define=USE_TEST_ADS=true \
             --build-number="$BUILD_NUMBER" \
             --export-options-plist=/Users/builder/export_options.plist
     artifacts:
