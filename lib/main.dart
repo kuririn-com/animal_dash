@@ -3,6 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:flutter/services.dart';
+import 'ads.dart';
+import 'game_canvas.dart';
 
 import 'package:flame/game.dart';
 
@@ -27,6 +30,11 @@ enum GameState { title, playing, gameOver }
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+
   // 今回は iPhone のみリリース。
   // Chrome(Web)では広告SDKを初期化しないため、ゲーム本体の確認は可能です。
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
@@ -39,124 +47,37 @@ Future<void> main() async {
 
 
 class GameApp extends StatelessWidget {
-
   const GameApp({super.key});
 
-
-
   @override
-
   Widget build(BuildContext context) {
-
     return MaterialApp(
-
       debugShowCheckedModeBanner: false,
-
       home: Scaffold(
-
+        backgroundColor: const Color(0xFFE0F7FA),
         body: SafeArea(
-
-          child: GameWidget<AnimalGame>.controlled(
-
-            gameFactory: AnimalGame.new,
-
-            overlayBuilderMap: {
-
-              'TitleMenu': (context, game) => TitleOverlay(game: game),
-
-              'GameOverMenu': (context, game) => GameOverOverlay(game: game),
-
-            },
-
-            initialActiveOverlays: const ['TitleMenu'],
-
+          child: Column(
+            children: [
+              Expanded(
+                child: GameCanvas(
+                  child: GameWidget<AnimalGame>.controlled(
+                    gameFactory: AnimalGame.new,
+                    overlayBuilderMap: {
+                      'TitleMenu': (context, game) => TitleOverlay(game: game),
+                      'GameOverMenu': (context, game) => GameOverOverlay(game: game),
+                    },
+                    initialActiveOverlays: const ['TitleMenu'],
+                  ),
+                ),
+              ),
+              const BannerAdFooter(),
+            ],
           ),
-
         ),
-
-      ),
-
-    );
-
-  }
-
-}
-
-
-
-/// iOS用インタースティシャル広告管理。
-/// iOS本番用インタースティシャル広告管理。
-class InterstitialAdManager {
-  InterstitialAd? _interstitialAd;
-  bool _isLoading = false;
-
-  static const String _iosAdUnitId =
-      'ca-app-pub-9003840415284448/7344704711';
-
-  bool get isReady => _interstitialAd != null;
-
-  bool get _canUseAds =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-
-  void loadAd() {
-    if (!_canUseAds || _isLoading || _interstitialAd != null) return;
-
-    _isLoading = true;
-
-    InterstitialAd.load(
-      adUnitId: _iosAdUnitId,
-      request: const AdRequest(),
-      adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (InterstitialAd ad) {
-          _isLoading = false;
-          _interstitialAd = ad;
-          debugPrint('Interstitial ad loaded.');
-        },
-        onAdFailedToLoad: (LoadAdError error) {
-          _isLoading = false;
-          _interstitialAd = null;
-          debugPrint('Interstitial ad failed to load: $error');
-        },
       ),
     );
   }
-
-  void showAd({required VoidCallback onFinished}) {
-    final ad = _interstitialAd;
-
-    // 広告が未準備ならゲームを止めず、そのまま次へ進む。
-    if (ad == null) {
-      loadAd();
-      onFinished();
-      return;
-    }
-
-    _interstitialAd = null;
-
-    ad.fullScreenContentCallback = FullScreenContentCallback(
-      onAdDismissedFullScreenContent: (InterstitialAd ad) {
-        ad.dispose();
-        onFinished();
-        loadAd(); // 次の3回目用を先読み
-      },
-      onAdFailedToShowFullScreenContent:
-          (InterstitialAd ad, AdError error) {
-        ad.dispose();
-        debugPrint('Interstitial ad failed to show: $error');
-        onFinished();
-        loadAd();
-      },
-    );
-
-    ad.show();
-  }
-
-  void dispose() {
-    _interstitialAd?.dispose();
-    _interstitialAd = null;
-  }
 }
-
 
 class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
@@ -209,9 +130,9 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   final Random random = Random();
 
-  // 広告管理。100m以上走ったゲームオーバーを3回数えるごとに表示。
+  // ゲーム終了3回ごとに広告を表示。未ロードなら次の終了時に再試行。
   final InterstitialAdManager interstitialAdManager = InterstitialAdManager();
-  int countedGameOverCount = 0;
+  final interstitialSchedule = InterstitialSchedule();
 
 
 
@@ -490,20 +411,14 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
       await prefs.setInt('highCoins', highCoins);
     }
 
-    // 短すぎるプレイで広告カウントが進むのを防ぐ。
-    // 100m以上走ったゲームオーバーだけを1回として数える。
-    if (distance >= 100) {
-      countedGameOverCount++;
-    }
-
-    final shouldShowInterstitial =
-        distance >= 100 && countedGameOverCount % 3 == 0;
-
+    interstitialSchedule.completeGame();
+    final shouldShowInterstitial = interstitialSchedule.isDue;
     // ゲームオーバーになった時点でFlame側は停止。
     pauseEngine();
 
     if (shouldShowInterstitial && interstitialAdManager.isReady) {
       interstitialAdManager.showAd(
+        onShown: interstitialSchedule.didShowAd,
         onFinished: () {
           // 広告を閉じてからゲームオーバー画面を表示。
           if (!overlays.isActive('GameOverMenu')) {
@@ -699,141 +614,47 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
 
 
-class TitleOverlay extends StatefulWidget {
-  final AnimalGame game;
-
+class TitleOverlay extends StatelessWidget {
   const TitleOverlay({super.key, required this.game});
-
-  @override
-  State<TitleOverlay> createState() => _TitleOverlayState();
-}
-
-class _TitleOverlayState extends State<TitleOverlay> {
-  BannerAd? _bannerAd;
-  bool _isBannerLoaded = false;
-
-  String? get _bannerAdUnitId {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
-      return null;
-    }
-    return 'ca-app-pub-9003840415284448/8849358073';
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadBanner();
-  }
-
-  void _loadBanner() {
-    final adUnitId = _bannerAdUnitId;
-    if (adUnitId == null) return;
-
-    final banner = BannerAd(
-      adUnitId: adUnitId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (ad) {
-          if (!mounted) {
-            ad.dispose();
-            return;
-          }
-          setState(() {
-            _bannerAd = ad as BannerAd;
-            _isBannerLoaded = true;
-          });
-        },
-        onAdFailedToLoad: (ad, error) {
-          ad.dispose();
-          debugPrint('Banner failed to load: $error');
-        },
-      ),
-    );
-
-    banner.load();
-  }
-
-  @override
-  void dispose() {
-    _bannerAd?.dispose();
-    super.dispose();
-  }
+  final AnimalGame game;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 50),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.9),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'アニマル・ラン',
-                  style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blueAccent,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  '🏆 最高きょり: ${widget.game.highDistance.toInt()}m',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    color: Colors.orange,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  '🟡 最高コイン: ${widget.game.highCoins}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    color: Colors.orange,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 30),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 40,
-                      vertical: 15,
-                    ),
-                  ),
-                  onPressed: widget.game.startGame,
-                  child: const Text('スタート', style: TextStyle(fontSize: 24)),
-                ),
-              ],
-            ),
-          ),
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 40),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(20),
         ),
-
-        // タイトル画面の一番下にだけ表示。
-        // startGame() で TitleMenu overlay が消えると、この広告も dispose されます。
-        if (_isBannerLoaded && _bannerAd != null)
-          SafeArea(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: SizedBox(
-                width: _bannerAd!.size.width.toDouble(),
-                height: _bannerAd!.size.height.toDouble(),
-                child: AdWidget(ad: _bannerAd!),
-              ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('アニマル・ラン', style: TextStyle(
+              fontSize: 36, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+            const SizedBox(height: 16),
+            Text('🏆 最高きょり: ${game.highDistance.toInt()}m',
+              style: const TextStyle(fontSize: 20, color: Colors.orange,
+                fontWeight: FontWeight.bold)),
+            Text('🟡 最高コイン: ${game.highCoins}',
+              style: const TextStyle(fontSize: 20, color: Colors.orange,
+                fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            const Text('画面をタップでジャンプ・2回タップで2段ジャンプ',
+              style: TextStyle(fontSize: 18)),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(padding:
+                const EdgeInsets.symmetric(horizontal: 40, vertical: 15)),
+              onPressed: game.startGame,
+              child: const Text('スタート', style: TextStyle(fontSize: 24)),
             ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 }
-
 class GameOverOverlay extends StatelessWidget {
 
   final AnimalGame game;
