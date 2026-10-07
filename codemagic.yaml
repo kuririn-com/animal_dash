@@ -19,6 +19,7 @@ workflows:
         script: flutter pub get
       - name: Check game layout and ad scheduling
         script: |
+          set -e
           flutter analyze --no-fatal-infos
           flutter test
       - name: Install iOS dependencies
@@ -64,6 +65,7 @@ workflows:
         script: flutter pub get
       - name: Check game layout and ad scheduling
         script: |
+          set -e
           flutter analyze --no-fatal-infos
           flutter test
       - name: Install iOS dependencies
