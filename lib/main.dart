@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'ads.dart';
 import 'game_canvas.dart';
+import 'purchases.dart';
 
 import 'package:flame/game.dart';
 
@@ -36,6 +38,7 @@ Future<void> main() async {
   ]);
 
   runApp(const GameApp());
+  if (AdFreePurchase.supported) unawaited(AdFreePurchase.instance.initialize());
 }
 
 
@@ -643,6 +646,15 @@ class TitleOverlay extends StatelessWidget {
               onPressed: game.startGame,
               child: const Text('スタート', style: TextStyle(fontSize: 24)),
             ),
+            if (AdFreePurchase.supported)
+              ListenableBuilder(
+                listenable: AdFreePurchase.instance,
+                builder: (context, _) => TextButton(
+                  onPressed: () => showAdFreePurchase(context),
+                  child: Text(AdFreePurchase.instance.owned
+                      ? '広告なし（購入済み）' : '広告を削除・購入を復元'),
+                ),
+              ),
           ],
         ),
       ),

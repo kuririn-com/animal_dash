@@ -1,15 +1,17 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'privacy.dart';
+import 'purchases.dart';
 
 class AdConfig {
   static const useTestAds = bool.fromEnvironment('USE_TEST_ADS');
   static const captureScreenshots = bool.fromEnvironment('CAPTURE_SCREENSHOTS');
   static bool get enabled =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+      AdFreePurchase.supported &&
+      AdFreePurchase.instance.ready &&
+      !AdFreePurchase.instance.owned;
   static String get bannerId => useTestAds
       ? 'ca-app-pub-3940256099942544/2934735716'
       : 'ca-app-pub-9003840415284448/8849358073';
@@ -23,7 +25,12 @@ class AdPrivacy {
   static final allowed = ValueNotifier<bool>(false);
   static bool optionsRequired = false;
 
-  static Future<bool> initialize() => _initialization ??= _prepare();
+  static Future<bool> initialize() {
+    if (!AdConfig.enabled || AdConfig.captureScreenshots) {
+      return Future.value(false);
+    }
+    return _initialization ??= _prepare();
+  }
 
   static Future<bool> _prepare() async {
     if (!AdConfig.enabled || AdConfig.captureScreenshots) return false;
@@ -41,11 +48,14 @@ class AdPrivacy {
     );
     await consent.future;
     try {
-      optionsRequired = await ConsentInformation.instance
+      optionsRequired =
+          await ConsentInformation.instance
               .getPrivacyOptionsRequirementStatus() ==
           PrivacyOptionsRequirementStatus.required;
       final canServe = await ConsentInformation.instance.canRequestAds();
+      if (!AdConfig.enabled) return false;
       if (canServe) await MobileAds.instance.initialize();
+      if (!AdConfig.enabled) return false;
       allowed.value = canServe;
       return canServe;
     } catch (error) {
@@ -56,10 +66,11 @@ class AdPrivacy {
 
   static Future<void> refresh() async {
     allowed.value = false;
+    if (!AdConfig.enabled) return;
     final canServe = await ConsentInformation.instance.canRequestAds();
     if (canServe) await MobileAds.instance.initialize();
     _initialization = Future<bool>.value(canServe);
-    allowed.value = canServe;
+    allowed.value = canServe && AdConfig.enabled;
   }
 }
 
@@ -74,15 +85,17 @@ class InterstitialSchedule {
 class InterstitialAdManager {
   InterstitialAdManager() {
     AdPrivacy.allowed.addListener(_privacyChanged);
+    AdFreePurchase.instance.addListener(_privacyChanged);
   }
   InterstitialAd? _ad;
   Timer? _retry;
   bool _loading = false;
   bool _disposed = false;
-  bool get isReady => _ad != null;
+  bool get isReady =>
+      AdConfig.enabled && AdPrivacy.allowed.value && _ad != null;
 
   void _privacyChanged() {
-    if (AdPrivacy.allowed.value) {
+    if (AdConfig.enabled) {
       loadAd();
     } else {
       _retry?.cancel();
@@ -100,7 +113,10 @@ class InterstitialAdManager {
 
   Future<void> _loadAfterConsent() async {
     final canServe = await AdPrivacy.initialize();
-    if (!canServe || _disposed || !AdPrivacy.allowed.value) {
+    if (!canServe ||
+        _disposed ||
+        !AdPrivacy.allowed.value ||
+        !AdConfig.enabled) {
       _loading = false;
       return;
     }
@@ -110,7 +126,7 @@ class InterstitialAdManager {
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
           _loading = false;
-          if (_disposed || !AdPrivacy.allowed.value) {
+          if (_disposed || !AdPrivacy.allowed.value || !AdConfig.enabled) {
             ad.dispose();
             return;
           }
@@ -125,9 +141,12 @@ class InterstitialAdManager {
     );
   }
 
-  void showAd({required VoidCallback onFinished, required VoidCallback onShown}) {
+  void showAd({
+    required VoidCallback onFinished,
+    required VoidCallback onShown,
+  }) {
     final ad = _ad;
-    if (ad == null || _disposed) {
+    if (ad == null || _disposed || !isReady) {
       loadAd();
       onFinished();
       return;
@@ -157,6 +176,7 @@ class InterstitialAdManager {
   void dispose() {
     _disposed = true;
     AdPrivacy.allowed.removeListener(_privacyChanged);
+    AdFreePurchase.instance.removeListener(_privacyChanged);
     _retry?.cancel();
     _ad?.dispose();
     _ad = null;
@@ -180,12 +200,14 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
   void initState() {
     super.initState();
     AdPrivacy.allowed.addListener(_privacyChanged);
+    AdFreePurchase.instance.addListener(_privacyChanged);
     if (AdConfig.enabled) _load();
   }
 
   void _privacyChanged() {
     if (!mounted) return;
-    if (AdPrivacy.allowed.value) {
+    if (AdConfig.enabled) {
+      setState(() {});
       _load();
     } else {
       _retry?.cancel();
@@ -198,21 +220,24 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
   }
 
   Future<void> _load() async {
-    if (!mounted || _pending || _ad != null) return;
+    if (!mounted || !AdConfig.enabled || _pending || _ad != null) return;
     _pending = true;
     _retry?.cancel();
     final canServe = await AdPrivacy.initialize();
     _pending = false;
     if (!mounted) return;
     setState(() {});
-    if (!canServe || !AdPrivacy.allowed.value) return;
+    if (!canServe || !AdPrivacy.allowed.value || !AdConfig.enabled) return;
     final ad = BannerAd(
       adUnitId: AdConfig.bannerId,
       size: AdSize.banner,
       request: const AdRequest(nonPersonalizedAds: true),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
-          if (!mounted || !AdPrivacy.allowed.value || !identical(_ad, ad)) {
+          if (!mounted ||
+              !AdPrivacy.allowed.value ||
+              !AdConfig.enabled ||
+              !identical(_ad, ad)) {
             ad.dispose();
             return;
           }
@@ -236,26 +261,29 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
 
   @override
   Widget build(BuildContext context) {
-    if (!AdConfig.enabled) return const SizedBox.shrink();
+    if (!AdFreePurchase.supported) return const SizedBox.shrink();
     return SizedBox(
-      height: AdSize.banner.height.toDouble(),
+      height: AdConfig.enabled ? AdSize.banner.height.toDouble() : 36,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: AdSize.banner.width.toDouble(),
-            child: _loaded && _ad != null
-            ? SizedBox(
-                width: _ad!.size.width.toDouble(),
-                height: _ad!.size.height.toDouble(),
-                child: AdWidget(ad: _ad!),
-              )
-            : const SizedBox.shrink(),
-          ),
+          if (AdConfig.enabled)
+            SizedBox(
+              width: AdSize.banner.width.toDouble(),
+              child: _loaded && _ad != null
+                  ? SizedBox(
+                      width: _ad!.size.width.toDouble(),
+                      height: _ad!.size.height.toDouble(),
+                      child: AdWidget(ad: _ad!),
+                    )
+                  : const SizedBox.shrink(),
+            ),
           TextButton(
-            onPressed: () => showGamePrivacy(context,
+            onPressed: () => showGamePrivacy(
+              context,
               optionsRequired: AdPrivacy.optionsRequired,
-              onConsentChanged: () => unawaited(AdPrivacy.refresh())),
+              onConsentChanged: () => unawaited(AdPrivacy.refresh()),
+            ),
             child: const Text('プライバシー'),
           ),
         ],
@@ -267,6 +295,7 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
   void dispose() {
     _retry?.cancel();
     AdPrivacy.allowed.removeListener(_privacyChanged);
+    AdFreePurchase.instance.removeListener(_privacyChanged);
     _ad?.dispose();
     super.dispose();
   }
