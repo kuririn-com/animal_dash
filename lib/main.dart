@@ -1,8 +1,8 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
+
+
 import 'package:flutter/services.dart';
 import 'ads.dart';
 import 'game_canvas.dart';
@@ -34,12 +34,6 @@ Future<void> main() async {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
-
-  // 今回は iPhone のみリリース。
-  // Chrome(Web)では広告SDKを初期化しないため、ゲーム本体の確認は可能です。
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-    await MobileAds.instance.initialize();
-  }
 
   runApp(const GameApp());
 }
