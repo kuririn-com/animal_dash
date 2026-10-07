@@ -44,3 +44,74 @@ workflows:
         auth: integration
         submit_to_testflight: false
         submit_to_app_store: false
+  ios-release:
+    name: Animal Dash - App Store
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: Codemagic Animal Dash
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      vars:
+        APP_STORE_APPLE_ID: "6819274677"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.animalDash
+    scripts:
+      - name: Install Flutter dependencies
+        script: flutter pub get
+      - name: Check game layout and ad scheduling
+        script: |
+          flutter analyze --no-fatal-infos
+          flutter test
+      - name: Install iOS dependencies
+        script: |
+          cd ios
+          pod install --repo-update
+      - name: Configure iOS code signing
+        script: xcode-project use-profiles
+      - name: Build TestFlight IPA
+        script: |
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID")
+          BUILD_NUMBER=$(( ${LATEST_BUILD_NUMBER:-0} + 1 ))
+          flutter build ipa --release \
+            --dart-define=USE_TEST_ADS=false \
+            --build-number="$BUILD_NUMBER" \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/ios/archive/*.xcarchive
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
+  store-screenshots:
+    name: Animal Dash - Store screenshots
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install Flutter dependencies
+        script: flutter pub get
+      - name: Validate release changes
+        script: |
+          set -e
+          flutter analyze --no-fatal-infos
+          flutter test
+      - name: Capture iPhone and iPad screenshots
+        script: python3 tool/capture_store_screenshots.py
+      - name: Package screenshots
+        script: |
+          cd store-assets
+          zip -r ../store-screenshots.zip .
+    artifacts:
+      - store-assets/*.png
+      - store-assets/dimensions.json
+      - store-screenshots.zip
