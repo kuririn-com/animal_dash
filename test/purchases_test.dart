@@ -116,8 +116,6 @@ void main() {
   testWidgets(
     'unknown or purchased ownership suppresses banner and interstitial',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final shared = AdFreePurchase.instance;
       shared.ready = false;
       shared.owned = false;
@@ -150,5 +148,6 @@ void main() {
       shared.owned = false;
       expect(AdConfig.enabled, isTrue);
     },
+    variant: TargetPlatformVariant({TargetPlatform.iOS}),
   );
 }
