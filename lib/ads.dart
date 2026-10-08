@@ -29,7 +29,10 @@ class AdPrivacy {
     if (!AdConfig.enabled || AdConfig.captureScreenshots) {
       return Future.value(false);
     }
-    return _initialization ??= _prepare();
+    return _initialization ??= _prepare().then((canServe) {
+      if (!AdConfig.enabled) _initialization = null;
+      return canServe;
+    });
   }
 
   static Future<bool> _prepare() async {
@@ -95,12 +98,13 @@ class InterstitialAdManager {
       AdConfig.enabled && AdPrivacy.allowed.value && _ad != null;
 
   void _privacyChanged() {
-    if (AdConfig.enabled) {
+    if (AdConfig.enabled && AdPrivacy.allowed.value) {
       loadAd();
     } else {
       _retry?.cancel();
       _ad?.dispose();
       _ad = null;
+      if (AdConfig.enabled) loadAd();
     }
   }
 
@@ -206,7 +210,7 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
 
   void _privacyChanged() {
     if (!mounted) return;
-    if (AdConfig.enabled) {
+    if (AdConfig.enabled && AdPrivacy.allowed.value) {
       setState(() {});
       _load();
     } else {
@@ -216,6 +220,7 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
         _ad = null;
         _loaded = false;
       });
+      if (AdConfig.enabled) _load();
     }
   }
 
