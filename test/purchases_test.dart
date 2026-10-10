@@ -142,8 +142,8 @@ void main() {
       await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: BannerAdFooter())),
       );
-      expect(find.text('プライバシー'), findsOneWidget);
-      expect(tester.getSize(find.byType(BannerAdFooter)).height, 36);
+      expect(find.text('プライバシー'), findsNothing);
+      expect(tester.getSize(find.byType(BannerAdFooter)).height, 0);
       expect(tester.takeException(), isNull);
       shared.owned = false;
       expect(AdConfig.enabled, isTrue);
