@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'ads.dart';
 import 'game_canvas.dart';
 import 'purchases.dart';
+import 'privacy.dart';
 
 import 'package:flame/game.dart';
 
@@ -627,7 +628,7 @@ class TitleOverlay extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('アニマル・ラン', style: TextStyle(
+            const Text('Animal Dash', style: TextStyle(
               fontSize: 36, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
             const SizedBox(height: 16),
             Text('🏆 最高きょり: ${game.highDistance.toInt()}m',
@@ -646,15 +647,29 @@ class TitleOverlay extends StatelessWidget {
               onPressed: game.startGame,
               child: const Text('スタート', style: TextStyle(fontSize: 24)),
             ),
-            if (AdFreePurchase.supported)
-              ListenableBuilder(
-                listenable: AdFreePurchase.instance,
-                builder: (context, _) => TextButton(
-                  onPressed: () => showAdFreePurchase(context),
-                  child: Text(AdFreePurchase.instance.owned
-                      ? '広告なし（購入済み）' : '広告を削除・購入を復元'),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              children: [
+                if (AdFreePurchase.supported)
+                  ListenableBuilder(
+                    listenable: AdFreePurchase.instance,
+                    builder: (context, _) => TextButton(
+                      onPressed: () => showAdFreePurchase(context),
+                      child: Text(AdFreePurchase.instance.owned
+                          ? '広告なし（購入済み）' : '広告を削除・購入を復元'),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: () => showGamePrivacy(
+                    context,
+                    optionsRequired: AdPrivacy.optionsRequired,
+                    onConsentChanged: () => unawaited(AdPrivacy.refresh()),
+                  ),
+                  child: const Text('プライバシー'),
                 ),
-              ),
+              ],
+            ),
           ],
         ),
       ),
