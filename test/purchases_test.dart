@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:animal_dash/ads.dart';
 import 'package:animal_dash/purchases.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,7 +24,7 @@ void main() {
         case 'entitlement':
           return entitlement;
         case 'product':
-          return {'available': true, 'price': '¥100'};
+          return {'available': true, 'price': '100円'};
         case 'purchase':
           return purchaseResult;
         case 'restore':
@@ -56,7 +55,7 @@ void main() {
       await store.loadProduct();
       expect(store.ready, isTrue);
       expect(store.owned, isFalse);
-      expect(store.price, '¥100');
+      expect(store.price, '100円');
       await store.purchase();
       expect(store.owned, isTrue);
       entitlement = true;
@@ -78,6 +77,26 @@ void main() {
       expect(store.message, contains('承認待ち'));
       await event(true);
       expect(store.owned, isTrue);
+    },
+  );
+
+  test(
+    'non-JPY product response cannot show a stale price or start a purchase',
+    () async {
+      await store.initialize();
+      await store.loadProduct();
+      expect(store.price, '100円');
+      var attemptedPurchase = false;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'purchase') attemptedPurchase = true;
+        return {'available': false, 'message': 'ストア国・地域が日本か確認してください。'};
+      });
+      await store.loadProduct();
+      expect(store.price, isNull);
+      expect(store.available, isFalse);
+      expect(store.message, contains('日本'));
+      await store.purchase();
+      expect(attemptedPurchase, isFalse);
     },
   );
 
