@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'privacy.dart';
 import 'purchases.dart';
 
 class AdConfig {
@@ -266,32 +265,17 @@ class _BannerAdFooterState extends State<BannerAdFooter> {
 
   @override
   Widget build(BuildContext context) {
-    if (!AdFreePurchase.supported) return const SizedBox.shrink();
+    if (!AdConfig.enabled) return const SizedBox.shrink();
     return SizedBox(
-      height: AdConfig.enabled ? AdSize.banner.height.toDouble() : 36,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (AdConfig.enabled)
-            SizedBox(
-              width: AdSize.banner.width.toDouble(),
-              child: _loaded && _ad != null
-                  ? SizedBox(
-                      width: _ad!.size.width.toDouble(),
-                      height: _ad!.size.height.toDouble(),
-                      child: AdWidget(ad: _ad!),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          TextButton(
-            onPressed: () => showGamePrivacy(
-              context,
-              optionsRequired: AdPrivacy.optionsRequired,
-              onConsentChanged: () => unawaited(AdPrivacy.refresh()),
-            ),
-            child: const Text('プライバシー'),
-          ),
-        ],
+      height: AdSize.banner.height.toDouble(),
+      child: Center(
+        child: _loaded && _ad != null
+            ? SizedBox(
+                width: _ad!.size.width.toDouble(),
+                height: _ad!.size.height.toDouble(),
+                child: AdWidget(ad: _ad!),
+              )
+            : const SizedBox.shrink(),
       ),
     );
   }
