@@ -74,7 +74,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await boundary.toImage();
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
-        final directory = Directory('../../outputs/update-preview')
+        final directory = Directory('build/update-preview')
           ..createSync(recursive: true);
         await File(
           '${directory.path}/$name.png',
