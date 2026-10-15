@@ -60,8 +60,14 @@ class AdFreePurchase extends ChangeNotifier with WidgetsBindingObserver {
       );
       price = product?['price'] as String?;
       available = product?['available'] == true && price != null;
+      if (product?['message'] is String) {
+        message = product!['message'] as String;
+      } else if (!busy) {
+        message = null;
+      }
     } catch (_) {
       available = false;
+      price = null;
     }
     _notify();
   }
@@ -111,7 +117,10 @@ class AdFreePurchase extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(refreshEntitlement());
+    if (state == AppLifecycleState.resumed) {
+      unawaited(refreshEntitlement());
+      unawaited(loadProduct());
+    }
   }
 
   @override
