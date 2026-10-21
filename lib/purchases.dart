@@ -15,6 +15,7 @@ class AdFreePurchase extends ChangeNotifier with WidgetsBindingObserver {
   bool available = false;
   bool busy = false;
   String? price;
+  bool referencePrice = false;
   String? message;
   Future<void>? _initialization;
   bool _disposed = false;
@@ -59,9 +60,13 @@ class AdFreePurchase extends ChangeNotifier with WidgetsBindingObserver {
         'product',
       );
       price = product?['price'] as String?;
+      referencePrice = product?['referencePrice'] == true;
       available = product?['available'] == true && price != null;
+      if (!busy) message = product?['message'] as String?;
     } catch (_) {
       available = false;
+      price = null;
+      referencePrice = false;
     }
     _notify();
   }
@@ -143,9 +148,16 @@ Future<void> showAdFreePurchase(BuildContext context) async {
                 store.owned
                     ? '購入済み：広告なしで遊べます。'
                     : store.available
-                    ? '価格：${store.price}'
+                    ? '${store.referencePrice ? '日本での販売価格' : '価格'}：${store.price}'
                     : '現在、商品情報を取得できません。',
               ),
+              if (store.referencePrice)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'テスト購入です。Appleの確認画面はテスト用ストアの通貨になる場合があります。実際の請求は発生しません。',
+                  ),
+                ),
               const SizedBox(height: 8),
               const Text('再インストールや機種変更後は、同じApple Accountで「購入を復元」を選んでください。'),
               if (store.busy)
@@ -170,7 +182,11 @@ Future<void> showAdFreePurchase(BuildContext context) async {
             FilledButton(
               onPressed: store.busy || !store.available ? null : store.purchase,
               child: Text(
-                store.price == null ? '広告を削除' : '${store.price}で広告を削除',
+                store.referencePrice
+                    ? '広告削除をテスト購入'
+                    : store.price == null
+                    ? '広告を削除'
+                    : '${store.price}で広告を削除',
               ),
             ),
           TextButton(
