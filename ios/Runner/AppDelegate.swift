@@ -60,6 +60,31 @@ private final class AdFreeStore {
     try await Product.products(for: [Self.productID]).first
   }
 
+  private func japanesePrice(_ product: Product) -> String? {
+    guard product.priceFormatStyle.currencyCode == "JPY" else { return nil }
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "ja_JP")
+    formatter.numberStyle = .decimal
+    formatter.maximumFractionDigits = 0
+    guard let amount = formatter.string(from: product.price as NSDecimalNumber) else { return nil }
+    return "\(amount)円"
+  }
+
+  // This controls explanatory pricing only; verified transactions still grant ownership.
+  private func isTestStore() async -> Bool {
+#if DEBUG
+    return true
+#else
+    if #available(iOS 16.0, *) {
+      if let verification = try? await AppTransaction.shared,
+         case .verified(let app) = verification {
+        return app.environment == .sandbox
+      }
+    }
+    return Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+#endif
+  }
+
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) async {
     switch call.method {
     case "entitlement":
@@ -70,7 +95,16 @@ private final class AdFreeStore {
           result(["available": false])
           return
         }
-        result(["available": AppStore.canMakePayments, "price": product.displayPrice])
+        if let price = japanesePrice(product) {
+          result(["available": AppStore.canMakePayments, "price": price, "referencePrice": false])
+        } else if await isTestStore() {
+          // Japan price confirmed in App Store Connect on 2026-10-21.
+          // This is a reference price, never a conversion of the sandbox USD amount.
+          result(["available": AppStore.canMakePayments, "price": "100円", "referencePrice": true])
+        } else {
+          result(["available": false,
+                  "message": "日本向けの商品です。Apple Accountのストア国・地域をご確認ください。"])
+        }
       } catch {
         result(FlutterError(code: "STORE_UNAVAILABLE", message: "商品情報を取得できません。", details: nil))
       }
