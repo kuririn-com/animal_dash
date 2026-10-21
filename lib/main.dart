@@ -26,7 +26,7 @@ import 'package:flame_audio/flame_audio.dart';
 
 
 
-enum GameState { title, playing, gameOver }
+enum GameState { title, playing, paused, gameOver }
 
 
 
@@ -62,6 +62,8 @@ class GameApp extends StatelessWidget {
                     gameFactory: AnimalGame.new,
                     overlayBuilderMap: {
                       'TitleMenu': (context, game) => TitleOverlay(game: game),
+                      'PauseControl': (context, game) => PauseControl(game: game),
+                      'PauseMenu': (context, game) => PauseMenu(game: game),
                       'GameOverMenu': (context, game) => GameOverOverlay(game: game),
                     },
                     initialActiveOverlays: const ['TitleMenu'],
@@ -78,6 +80,44 @@ class GameApp extends StatelessWidget {
 }
 
 class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
+  AnimalGame({this.audioEnabled = true});
+  final bool audioEnabled;
+  Future<void> _musicOperations = Future<void>.value();
+  void _music(Future<void> Function() operation) {
+    if (!audioEnabled) return;
+    _musicOperations = _musicOperations.then((_) async {
+      try { await operation(); } catch (_) { /* Audio must not block gameplay. */ }
+    });
+  }
+  void _playMusic() => _music(() async {
+    await FlameAudio.bgm.stop();
+    await FlameAudio.bgm.play('bgm.mp3', volume: 0.5);
+  });
+  void pauseGame() {
+    if (state != GameState.playing) return;
+    state = GameState.paused;
+    overlays.remove('PauseControl');
+    overlays.add('PauseMenu');
+    pauseEngine();
+    _music(() => FlameAudio.bgm.pause());
+  }
+  void continueGame() {
+    if (state != GameState.paused) return;
+    overlays.remove('PauseMenu');
+    overlays.add('PauseControl');
+    state = GameState.playing;
+    resumeEngine();
+    _music(() => FlameAudio.bgm.resume());
+  }
+  @override
+  void lifecycleStateChange(AppLifecycleState lifecycle) {
+    if (lifecycle != AppLifecycleState.resumed && state == GameState.playing) {
+      pauseGame();
+    }
+    super.lifecycleStateChange(lifecycle);
+    if (state == GameState.paused) pauseEngine();
+  }
+
 
   late Player player;
 
@@ -156,7 +196,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
 
 
-    await FlameAudio.audioCache.load('bgm.mp3');
+    if (audioEnabled) await FlameAudio.audioCache.load('bgm.mp3');
 
 
 
@@ -214,15 +254,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
 
 
-    add(RectangleComponent(
-
-      position: Vector2(0, 400),
-
-      size: Vector2(size.x, max(0.0, size.y - 400)),
-
-      paint: Paint()..color = Colors.lightGreen,
-
-    )..priority = 0);
+    add(ResponsiveGround());
 
     // 起動時に全画面広告を1本だけ先読みしておく。
     interstitialAdManager.loadAd();
@@ -236,12 +268,11 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
     state = GameState.playing;
 
     overlays.remove('TitleMenu');
+    overlays.add('PauseControl');
 
 
 
-    FlameAudio.bgm.stop();
-
-    FlameAudio.bgm.play('bgm.mp3', volume: 0.5);
+    _playMusic();
 
     bgmStarted = true;
 
@@ -253,6 +284,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   void update(double dt) {
 
+    if (state == GameState.paused) return;
     super.update(dt);
 
     if (state == GameState.gameOver) return; 
@@ -395,7 +427,10 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
     // 衝突判定が同じフレームで複数回来ても二重処理しない。
     if (state == GameState.gameOver) return;
 
+    if (state != GameState.playing) return;
     state = GameState.gameOver;
+    overlays.remove('PauseControl');
+    overlays.remove('PauseMenu');
 
     final prefs = await SharedPreferences.getInstance();
 
@@ -493,6 +528,8 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
   bool get isBreakerActive => destroyTimer > 0;
 
   void resetGame() {
+    overlays.remove('PauseMenu');
+    overlays.add('PauseControl');
 
     state = GameState.playing;
 
@@ -535,9 +572,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
 
 
-    FlameAudio.bgm.stop();
-
-    FlameAudio.bgm.play('bgm.mp3', volume: 0.5);
+    _playMusic();
 
     resumeEngine(); 
 
@@ -546,6 +581,8 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
 
   void backToTitle() {
+    overlays.remove('PauseMenu');
+    overlays.remove('PauseControl');
 
     state = GameState.title;
 
@@ -590,9 +627,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
 
 
-    FlameAudio.bgm.stop();
-
-    FlameAudio.bgm.play('bgm.mp3', volume: 0.5);
+    _playMusic();
 
     resumeEngine(); 
 
@@ -600,6 +635,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   @override
   void onRemove() {
+    _music(() => FlameAudio.bgm.stop());
     interstitialAdManager.dispose();
     super.onRemove();
   }
@@ -611,6 +647,49 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 // --- UI ---
 
 
+
+/// Ground dimensions follow the current logical canvas, including banner changes.
+class ResponsiveGround extends RectangleComponent {
+  ResponsiveGround() : super(position: Vector2(0, 400),
+      paint: Paint()..color = Colors.lightGreen, priority: 0);
+  @override
+  void onGameResize(Vector2 canvasSize) {
+    super.onGameResize(canvasSize);
+    size = Vector2(canvasSize.x, max(0.0, canvasSize.y - 400));
+  }
+}
+
+class PauseControl extends StatelessWidget {
+  const PauseControl({super.key, required this.game});
+  final AnimalGame game;
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topRight,
+    child: Padding(padding: const EdgeInsets.all(12), child: Material(
+      color: Colors.white.withValues(alpha: .9), shape: const CircleBorder(),
+      child: IconButton(tooltip: '一時停止', icon: const Icon(Icons.pause),
+        onPressed: game.pauseGame),
+    )),
+  );
+}
+
+class PauseMenu extends StatelessWidget {
+  const PauseMenu({super.key, required this.game});
+  final AnimalGame game;
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: Colors.black54,
+    child: Center(child: Card(child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('一時停止', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 18),
+        FilledButton(onPressed: game.continueGame, child: const Text('つづける')),
+        TextButton(onPressed: game.backToTitle, child: const Text('タイトルへ戻る')),
+      ]),
+    ))),
+  );
+}
 
 class TitleOverlay extends StatelessWidget {
   const TitleOverlay({super.key, required this.game});
