@@ -25,6 +25,7 @@ void main() {
     await binding.takeScreenshot('${device}_01_title');
 
     await tester.tap(find.text('広告を削除・購入を復元'));
+    await Future<void>.delayed(const Duration(seconds: 2));
     await tester.pump();
     expect(find.text('購入を復元'), findsOneWidget);
     await binding.takeScreenshot('${device}_04_iap');
