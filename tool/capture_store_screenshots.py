@@ -2,6 +2,7 @@
 import json
 import re
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -9,12 +10,80 @@ def run(*args):
     subprocess.run(args, check=True)
 
 
+@contextmanager
+def local_storekit_capture():
+    """Use Apple's local StoreKit Test only for this simulator capture job."""
+    delegate = Path("ios/Runner/AppDelegate.swift")
+    original = delegate.read_text()
+    config = {
+        "identifier": "A11DA500",
+        "nonRenewingSubscriptions": [],
+        "products": [{
+            "displayPrice": "100", "familyShareable": False,
+            "internalID": "6820531328",
+            "localizations": [{
+                "description": "バナー広告と全画面広告を削除します。",
+                "displayName": "広告を削除", "locale": "ja_JP"}],
+            "productID": "com.example.animalDash.remove_ads",
+            "referenceName": "Remove Ads", "type": "NonConsumable",
+        }],
+        "settings": {"_failTransactionsEnabled": False,
+                     "_locale": "ja_JP", "_storefront": "JPN"},
+        "subscriptionGroups": [], "version": {"major": 3, "minor": 0},
+    }
+    source = original.replace(
+        "import StoreKit\n",
+        "import StoreKit\n#if DEBUG && targetEnvironment(simulator)\n"
+        "import StoreKitTest\n#endif\n", 1)
+    source = source.replace(
+        "  private let channel: FlutterMethodChannel",
+        "#if DEBUG && targetEnvironment(simulator)\n"
+        "  private var screenshotStore: SKTestSession?\n#endif\n"
+        "  private let channel: FlutterMethodChannel", 1)
+    setup = r'''
+#if DEBUG && targetEnvironment(simulator)
+    do {
+      let config = #"CONFIG_JSON"#
+      let url = FileManager.default.temporaryDirectory.appendingPathComponent("AnimalDash.storekit")
+      try Data(config.utf8).write(to: url)
+      let session = try SKTestSession(contentsOf: url)
+      session.storefront = "JPN"
+      session.locale = Locale(identifier: "ja_JP")
+      session.disableDialogs = false
+      session.clearTransactions()
+      screenshotStore = session
+    } catch {
+      fatalError("StoreKit screenshot session failed: \(error)")
+    }
+#endif
+'''.replace("CONFIG_JSON", json.dumps(config, ensure_ascii=False))
+    needle = "    self.channel = channel\n"
+    if source.count(needle) != 1:
+        raise RuntimeError("Unexpected StoreKit bridge source")
+    source = source.replace(needle, needle + setup, 1)
+    if source == original or "import StoreKitTest" not in source:
+        raise RuntimeError("Screenshot StoreKit setup was not applied")
+    delegate.write_text(source)
+    try:
+        yield
+        Path("store-assets/capture-environment.json").write_text(json.dumps({
+            "store": "Apple StoreKit Test local configuration",
+            "storefront": "JPN", "price": "100 JPY",
+            "productID": "com.example.animalDash.remove_ads",
+            "purchasePerformed": False,
+            "releaseBinaryModified": False,
+        }, indent=2))
+    finally:
+        delegate.write_text(original)
+
+
 devices = json.loads(subprocess.check_output(
     ["xcrun", "simctl", "list", "devices", "available", "--json"], text=True
 ))["devices"]
 candidates = [d for runtime, rows in devices.items() if "iOS" in runtime
               for d in rows if d.get("isAvailable")]
-for label, pattern in [("iphone", r"iPhone .*Pro Max"),
+def capture():
+  for label, pattern in [("iphone", r"iPhone .*Pro Max"),
                        ("ipad", r"iPad Pro 13")]:
     matches = [d for d in candidates if re.search(pattern, d["name"])]
     if not matches:
@@ -33,6 +102,9 @@ for label, pattern in [("iphone", r"iPhone .*Pro Max"),
         "--dart-define=CAPTURE_SCREENSHOTS=true",
         f"--dart-define=SCREENSHOT_DEVICE={label}")
     run("xcrun", "simctl", "shutdown", device_id)
+
+with local_storekit_capture():
+    capture()
 
 # Retain original screenshots and verify their PNG header dimensions.
 dimensions = {}
