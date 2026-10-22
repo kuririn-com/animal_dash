@@ -15,6 +15,15 @@ def local_storekit_capture():
     """Use Apple's local StoreKit Test only for this simulator capture job."""
     delegate = Path("ios/Runner/AppDelegate.swift")
     original = delegate.read_text()
+    debug_config = Path("ios/Flutter/Debug.xcconfig")
+    original_debug = debug_config.read_text()
+    # StoreKitTest is a developer framework rather than an app SDK framework.
+    platform = subprocess.check_output(
+        ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-platform-path"],
+        text=True).strip()
+    frameworks = Path(platform) / "Developer/Library/Frameworks"
+    if not (frameworks / "StoreKitTest.framework").exists():
+        raise RuntimeError(f"StoreKit Test framework not installed: {frameworks}")
     config = {
         "identifier": "A11DA500",
         "nonRenewingSubscriptions": [],
@@ -64,6 +73,9 @@ def local_storekit_capture():
     if source == original or "import StoreKitTest" not in source:
         raise RuntimeError("Screenshot StoreKit setup was not applied")
     delegate.write_text(source)
+    debug_config.write_text(original_debug + "\n"
+        "FRAMEWORK_SEARCH_PATHS = $(inherited) $(PLATFORM_DIR)/Developer/Library/Frameworks\n"
+        "LD_RUNPATH_SEARCH_PATHS = $(inherited) $(PLATFORM_DIR)/Developer/Library/Frameworks\n")
     try:
         yield
         Path("store-assets/capture-environment.json").write_text(json.dumps({
@@ -75,6 +87,7 @@ def local_storekit_capture():
         }, indent=2))
     finally:
         delegate.write_text(original)
+        debug_config.write_text(original_debug)
 
 
 devices = json.loads(subprocess.check_output(
