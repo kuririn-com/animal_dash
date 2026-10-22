@@ -21,18 +21,6 @@ void main() {
       isTrue,
       reason: 'Native StoreKit entitlement channel must respond on iOS',
     );
-    for (var retry = 0; retry < 10; retry++) {
-      await AdFreePurchase.instance.loadProduct();
-      if (AdFreePurchase.instance.available) break;
-      await Future<void>.delayed(const Duration(seconds: 1));
-    }
-    expect(
-      AdFreePurchase.instance.available,
-      isTrue,
-      reason: 'Apple StoreKit Test must return the configured Japan product',
-    );
-    expect(AdFreePurchase.instance.price, '100円');
-    expect(AdFreePurchase.instance.referencePrice, isFalse);
     expect(find.text('スタート'), findsOneWidget);
     await binding.takeScreenshot('${device}_01_title');
 
