@@ -21,9 +21,15 @@ def local_storekit_capture():
     platform = subprocess.check_output(
         ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-platform-path"],
         text=True).strip()
-    frameworks = Path(platform) / "Developer/Library/Frameworks"
-    if not (frameworks / "StoreKitTest.framework").exists():
-        raise RuntimeError(f"StoreKit Test framework not installed: {frameworks}")
+    sdk = subprocess.check_output(
+        ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"],
+        text=True).strip()
+    candidates = [Path(sdk) / "Developer/Library/Frameworks",
+                  Path(platform) / "Developer/Library/Frameworks",
+                  Path(sdk) / "System/Library/Frameworks"]
+    frameworks = next((p for p in candidates
+                       if (p / "StoreKitTest.framework").exists()), None)
+    print(f"StoreKit Test framework directory: {frameworks}", flush=True)
     config = {
         "identifier": "A11DA500",
         "nonRenewingSubscriptions": [],
@@ -73,9 +79,12 @@ def local_storekit_capture():
     if source == original or "import StoreKitTest" not in source:
         raise RuntimeError("Screenshot StoreKit setup was not applied")
     delegate.write_text(source)
-    debug_config.write_text(original_debug + "\n"
-        "FRAMEWORK_SEARCH_PATHS = $(inherited) $(PLATFORM_DIR)/Developer/Library/Frameworks\n"
-        "LD_RUNPATH_SEARCH_PATHS = $(inherited) $(PLATFORM_DIR)/Developer/Library/Frameworks\n")
+    settings = "\nENABLE_TESTING_SEARCH_PATHS = YES\n"
+    settings += "OTHER_LDFLAGS = $(inherited) -framework StoreKitTest\n"
+    if frameworks:
+        settings += f'FRAMEWORK_SEARCH_PATHS = $(inherited) "{frameworks}"\n'
+        settings += f'LD_RUNPATH_SEARCH_PATHS = $(inherited) "{frameworks}"\n'
+    debug_config.write_text(original_debug + settings)
     try:
         yield
         Path("store-assets/capture-environment.json").write_text(json.dumps({
