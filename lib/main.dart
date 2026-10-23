@@ -26,7 +26,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flame_audio/flame_audio.dart';
 
-enum GameState { title, playing, gameOver }
+enum GameState { title, playing, paused, gameOver }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,6 +62,9 @@ class GameApp extends StatelessWidget {
                           GameOverOverlay(game: game),
                       'Inventory': (context, game) =>
                           InventoryOverlay(game: game),
+                      'PauseControl': (context, game) =>
+                          PauseControl(game: game),
+                      'PauseMenu': (context, game) => PauseMenu(game: game),
                     },
                     initialActiveOverlays: const ['TitleMenu'],
                   ),
@@ -85,6 +88,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
   final GameProgress progress = GameProgress();
   Weather weather = Weather.sunny;
   bool bootReady = false;
+  MusicTrack currentMusic = MusicTrack.original;
   String? audioError;
   Future<void> _musicOperations = Future<void>.value();
   int shieldCharges = 0;
@@ -92,7 +96,8 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   Future<void> playMusic() {
     if (!audioEnabled) return Future<void>.value();
-    // Serializing prevents rapid menu selections from leaving two tracks racing.
+    // Capture this run's random choice before queued audio operations execute.
+    final track = currentMusic;
     return _musicOperations = _musicOperations.then((_) async {
       try {
         await FlameAudio.bgm.stop();
@@ -101,32 +106,55 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
             iOS: AudioContextIOS(category: AVAudioSessionCategory.ambient),
           ),
         );
-        await FlameAudio.bgm.play(
-          progress.music.file,
-          volume: progress.musicVolume,
-        );
+        await FlameAudio.bgm.play(track.file, volume: 0.65);
         bgmStarted = true;
         audioError = null;
       } catch (_) {
         // Missing audio must never prevent the game from starting.
         bgmStarted = false;
-        audioError = 'BGMを再生できませんでした。曲を選び直してください。';
+        audioError = 'BGMを再生できませんでした。';
       }
     });
   }
 
-  Future<void> changeMusic(MusicTrack track) async {
-    progress.setMusic(track);
-    await playMusic();
+  void _queueMusic(Future<void> Function() operation) {
+    if (!audioEnabled) return;
+    _musicOperations = _musicOperations.then((_) async {
+      try {
+        await operation();
+      } catch (_) {
+        audioError = 'BGMを再生できませんでした。';
+      }
+    });
   }
 
-  Future<void> changeMusicVolume(double value) async {
-    progress.setVolume(value);
-    try {
-      await FlameAudio.bgm.audioPlayer.setVolume(progress.musicVolume);
-    } catch (_) {
-      audioError = 'BGM音量を変更できませんでした。曲を選び直してください。';
+  void pauseGame() {
+    if (state != GameState.playing) return;
+    state = GameState.paused;
+    overlays.remove('PauseControl');
+    overlays.remove('Inventory');
+    overlays.add('PauseMenu');
+    pauseEngine();
+    _queueMusic(() => FlameAudio.bgm.pause());
+  }
+
+  void continueGame() {
+    if (state != GameState.paused) return;
+    overlays.remove('PauseMenu');
+    overlays.add('PauseControl');
+    overlays.add('Inventory');
+    state = GameState.playing;
+    resumeEngine();
+    _queueMusic(() => FlameAudio.bgm.resume());
+  }
+
+  @override
+  void lifecycleStateChange(AppLifecycleState lifecycle) {
+    if (lifecycle != AppLifecycleState.resumed && state == GameState.playing) {
+      pauseGame();
     }
+    super.lifecycleStateChange(lifecycle);
+    if (state == GameState.paused) pauseEngine();
   }
 
   void useSupply(Supply item) {
@@ -156,6 +184,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   void prepareRun({Weather? scene}) {
     weather = scene ?? randomWeather(random);
+    currentMusic = MusicTrack.values[random.nextInt(MusicTrack.values.length)];
     children.whereType<TreeDecoration>().toList().forEach(
       (v) => v.removeFromParent(),
     );
@@ -196,7 +225,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   // アイテム効果
   double speedBaseDistance = 0;
-  double destroyTimer = 0;
   double magnetTimer = 0;
   double highJumpTimer = 0;
   double doubleCoinTimer = 0;
@@ -234,7 +262,7 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
           ),
         );
       } catch (_) {
-        audioError = 'BGMを準備できませんでした。曲を選び直してください。';
+        audioError = 'BGMを準備できませんでした。';
       }
     }
     add(Landscape(canvasSize: () => size, weather: () => weather));
@@ -289,12 +317,14 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
     state = GameState.playing;
     prepareRun();
     overlays.remove('TitleMenu');
+    overlays.add('PauseControl');
 
     unawaited(playMusic());
   }
 
   @override
   void update(double dt) {
+    if (state == GameState.paused) return;
     super.update(dt);
 
     if (state == GameState.gameOver) return;
@@ -304,7 +334,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
       final distanceSinceReset = max(0.0, distance - speedBaseDistance);
       gameSpeed = 1.0 + (distanceSinceReset / 800.0);
 
-      if (destroyTimer > 0) destroyTimer = max(0.0, destroyTimer - dt);
       if (magnetTimer > 0) magnetTimer = max(0.0, magnetTimer - dt);
       if (highJumpTimer > 0) highJumpTimer = max(0.0, highJumpTimer - dt);
       if (doubleCoinTimer > 0) doubleCoinTimer = max(0.0, doubleCoinTimer - dt);
@@ -360,7 +389,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
       if (player.isInvincible) {
         effects.add('⭐ 無敵 ${player.invincibleTimer.ceil()}秒');
       }
-      if (destroyTimer > 0) effects.add('💥 破壊 ${destroyTimer.ceil()}秒');
       if (magnetTimer > 0) effects.add('🧲 磁石 ${magnetTimer.ceil()}秒');
       if (highJumpTimer > 0) effects.add('🪽 大ジャンプ ${highJumpTimer.ceil()}秒');
       if (shieldReady) effects.add('🛡️ バリア $shieldCharges回');
@@ -401,10 +429,12 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
   Future<void> gameOver() async {
     // 衝突判定が同じフレームで複数回来ても二重処理しない。
-    if (state == GameState.gameOver) return;
+    if (state != GameState.playing) return;
 
     state = GameState.gameOver;
     overlays.remove('Inventory');
+    overlays.remove('PauseControl');
+    overlays.remove('PauseMenu');
     await progress.flush();
 
     final prefs = await SharedPreferences.getInstance();
@@ -496,7 +526,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
   bool get isDoubleCoinActive => doubleCoinTimer > 0;
 
   void activateBreaker() {
-    destroyTimer += 5.0;
     children.whereType<Obstacle>().toList().forEach(
       (o) => o.removeFromParent(),
     );
@@ -504,8 +533,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
       (m) => m.removeFromParent(),
     );
   }
-
-  bool get isBreakerActive => destroyTimer > 0;
 
   void resetGame() {
     state = GameState.playing;
@@ -521,7 +548,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
     itemTimer = 0;
     nextItemSpawnTime = 10.0;
     speedBaseDistance = 0;
-    destroyTimer = 0;
     magnetTimer = 0;
     highJumpTimer = 0;
     doubleCoinTimer = 0;
@@ -555,6 +581,8 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
     itemText.text = '';
 
     overlays.remove('GameOverMenu');
+    overlays.remove('PauseMenu');
+    overlays.add('PauseControl');
     prepareRun();
 
     unawaited(playMusic());
@@ -576,7 +604,6 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
     itemTimer = 0;
     nextItemSpawnTime = 10.0;
     speedBaseDistance = 0;
-    destroyTimer = 0;
     magnetTimer = 0;
     highJumpTimer = 0;
     doubleCoinTimer = 0;
@@ -613,6 +640,8 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 
     overlays.add('TitleMenu');
     overlays.remove('Inventory');
+    overlays.remove('PauseControl');
+    overlays.remove('PauseMenu');
 
     unawaited(playMusic());
 
@@ -629,6 +658,63 @@ class AnimalGame extends FlameGame with TapCallbacks, HasCollisionDetection {
 }
 
 // --- UI ---
+
+class PauseControl extends StatelessWidget {
+  const PauseControl({super.key, required this.game});
+  final AnimalGame game;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topRight,
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Material(
+        color: Colors.white.withValues(alpha: .9),
+        shape: const CircleBorder(),
+        child: IconButton(
+          tooltip: '一時停止',
+          icon: const Icon(Icons.pause),
+          onPressed: game.pauseGame,
+        ),
+      ),
+    ),
+  );
+}
+
+class PauseMenu extends StatelessWidget {
+  const PauseMenu({super.key, required this.game});
+  final AnimalGame game;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: Colors.black54,
+    child: Center(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '一時停止',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: game.continueGame,
+                child: const Text('つづける'),
+              ),
+              TextButton(
+                onPressed: game.backToTitle,
+                child: const Text('タイトルへ戻る'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
 class TitleOverlay extends StatelessWidget {
   const TitleOverlay({super.key, required this.game});
@@ -696,12 +782,6 @@ class TitleOverlay extends StatelessWidget {
                         ? () => showGameShop(context, game, initialTab: 1)
                         : null,
                     child: const Text('キャラ・着せ替え'),
-                  ),
-                  OutlinedButton(
-                    onPressed: game.progress.ready
-                        ? () => showGameShop(context, game, initialTab: 2)
-                        : null,
-                    child: const Text('BGM・背景の出現率'),
                   ),
                 ],
               ),
@@ -1566,6 +1646,244 @@ class TreeDecoration extends PositionComponent with HasGameRef<AnimalGame> {
 
 // --- プレイヤーと障害物 ---
 
+class _Costume extends PositionComponent {
+  _Costume(this.outfit);
+  final Outfit outfit;
+
+  @override
+  void render(Canvas canvas) {
+    if (outfit == Outfit.blue) {
+      final hood = Path()..fillType = PathFillType.evenOdd;
+      hood.addRRect(
+        RRect.fromRectAndRadius(
+          const Rect.fromLTWH(5, -3, 30, 30),
+          const Radius.circular(6),
+        ),
+      );
+      hood.addRect(const Rect.fromLTWH(11, 5, 20, 7));
+      canvas.drawPath(hood, Paint()..color = const Color(0xff202d5c));
+      final scarf = Path()
+        ..moveTo(8, 22)
+        ..lineTo(-16, 12)
+        ..lineTo(-9, 26)
+        ..lineTo(8, 29)
+        ..close();
+      canvas.drawPath(scarf, Paint()..color = const Color(0xffe84d63));
+      canvas.drawRect(
+        const Rect.fromLTWH(6, 23, 28, 5),
+        Paint()..color = const Color(0xffe84d63),
+      );
+      canvas.drawRect(
+        const Rect.fromLTWH(5, 47, 30, 4),
+        Paint()..color = const Color(0xff202d5c),
+      );
+      final blade = Path()
+        ..moveTo(29, 33)
+        ..lineTo(38, 29)
+        ..lineTo(34, 37)
+        ..lineTo(26, 41)
+        ..close();
+      canvas.drawPath(blade, Paint()..color = const Color(0xffb7d2e0));
+    } else if (outfit == Outfit.green) {
+      final hat = Path()
+        ..moveTo(-3, 3)
+        ..lineTo(20, -16)
+        ..lineTo(40, 3)
+        ..close();
+      canvas.drawPath(hat, Paint()..color = const Color(0xff1f8259));
+      canvas.drawRect(
+        const Rect.fromLTWH(-5, 2, 50, 5),
+        Paint()..color = const Color(0xff125d40),
+      );
+      final feather = Path()
+        ..moveTo(24, -5)
+        ..quadraticBezierTo(28, -26, 37, -23)
+        ..quadraticBezierTo(40, -13, 24, -5)
+        ..close();
+      canvas.drawPath(feather, Paint()..color = const Color(0xffa1dd55));
+      final cloak = Path()
+        ..moveTo(5, 25)
+        ..lineTo(-9, 60)
+        ..lineTo(5, 56)
+        ..close()
+        ..moveTo(35, 25)
+        ..lineTo(49, 60)
+        ..lineTo(35, 56)
+        ..close();
+      canvas.drawPath(cloak, Paint()..color = const Color(0xff387b49));
+      canvas.drawLine(
+        const Offset(8, 28),
+        const Offset(31, 57),
+        Paint()
+          ..color = const Color(0xff8c5737)
+          ..strokeWidth = 5,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          const Rect.fromLTWH(25, 45, 13, 14),
+          const Radius.circular(3),
+        ),
+        Paint()..color = const Color(0xffc39159),
+      );
+    } else if (outfit == Outfit.gold) {
+      final helmet = Path()..fillType = PathFillType.evenOdd;
+      helmet.addRRect(
+        RRect.fromRectAndRadius(
+          const Rect.fromLTWH(3, -5, 34, 32),
+          const Radius.circular(7),
+        ),
+      );
+      helmet.addRect(const Rect.fromLTWH(11, 5, 20, 14));
+      canvas.drawPath(helmet, Paint()..color = const Color(0xffffd568));
+      final plume = Path()
+        ..moveTo(17, -5)
+        ..lineTo(13, -23)
+        ..lineTo(24, -19)
+        ..lineTo(29, -7)
+        ..close();
+      canvas.drawPath(plume, Paint()..color = const Color(0xffdf425f));
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          const Rect.fromLTWH(4, 25, 32, 35),
+          const Radius.circular(4),
+        ),
+        Paint()..color = const Color(0xffffcf55),
+      );
+      canvas.drawLine(
+        const Offset(20, 27),
+        const Offset(20, 58),
+        Paint()
+          ..color = const Color(0xffffedac)
+          ..strokeWidth = 3,
+      );
+      final shield = Path()
+        ..moveTo(30, 32)
+        ..lineTo(47, 32)
+        ..lineTo(47, 48)
+        ..lineTo(39, 59)
+        ..lineTo(30, 48)
+        ..close();
+      canvas.drawPath(shield, Paint()..color = const Color(0xff355a9f));
+      canvas.drawPath(
+        shield,
+        Paint()
+          ..color = const Color(0xffffd568)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      );
+      canvas.drawCircle(
+        const Offset(39, 42),
+        3,
+        Paint()..color = const Color(0xffffd568),
+      );
+    }
+  }
+}
+
+class _RoyalRegalia extends PositionComponent {
+  _RoyalRegalia(this.color);
+  final Color color;
+
+  @override
+  void render(Canvas canvas) {
+    final cape = Path()
+      ..moveTo(6, 25)
+      ..lineTo(-4, 28)
+      ..lineTo(-13, 70)
+      ..lineTo(6, 62)
+      ..close()
+      ..moveTo(34, 25)
+      ..lineTo(44, 28)
+      ..lineTo(53, 70)
+      ..lineTo(34, 62)
+      ..close();
+    canvas.drawPath(cape, Paint()..color = const Color(0xffa4143e));
+    canvas.drawPath(
+      cape,
+      Paint()
+        ..color = const Color(0xffffd56a)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    const robe = Rect.fromLTWH(6, 25, 28, 36);
+    canvas.drawRect(robe, Paint()..color = color);
+    canvas.drawRect(
+      robe,
+      Paint()
+        ..color = const Color(0xffffd56a)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    final collar = Path()
+      ..moveTo(6, 25)
+      ..lineTo(20, 33)
+      ..lineTo(34, 25)
+      ..lineTo(31, 34)
+      ..lineTo(20, 39)
+      ..lineTo(9, 34)
+      ..close();
+    canvas.drawPath(collar, Paint()..color = const Color(0xfffff3df));
+    canvas.drawRect(
+      const Rect.fromLTWH(6, 47, 28, 5),
+      Paint()..color = const Color(0xffffd56a),
+    );
+    canvas.drawRect(
+      const Rect.fromLTWH(17, 47, 6, 5),
+      Paint()..color = const Color(0xffb14d70),
+    );
+  }
+}
+
+class _LionMane extends PositionComponent {
+  @override
+  void render(Canvas canvas) {
+    final mane = Path()..fillType = PathFillType.evenOdd;
+    // Leave the face clear; decorations never change the player's hitbox.
+    mane.addOval(const Rect.fromLTWH(-3, -11, 46, 46));
+    mane.addRect(const Rect.fromLTWH(8, 0, 24, 24));
+    canvas.drawPath(mane, Paint()..color = const Color(0xffb86a23));
+  }
+}
+
+class _AnimalFace extends PositionComponent {
+  _AnimalFace({this.lion = false});
+  final bool lion;
+
+  @override
+  void render(Canvas canvas) {
+    final whisker = Paint()
+      ..color = const Color(0xff463f3c)
+      ..strokeWidth = 1.2
+      ..strokeCap = StrokeCap.round;
+    for (final side in [-1.0, 1.0]) {
+      for (var row = -1; row <= 1; row++) {
+        canvas.drawLine(
+          Offset(20 + side * 5, 15 + row * 2.0),
+          Offset(20 + side * 20, 15 + row * 5.0),
+          whisker,
+        );
+      }
+    }
+    if (lion) {
+      final crown = Path()
+        ..moveTo(8, -7)
+        ..lineTo(5, -20)
+        ..lineTo(15, -14)
+        ..lineTo(20, -25)
+        ..lineTo(25, -14)
+        ..lineTo(35, -20)
+        ..lineTo(32, -7)
+        ..close();
+      canvas.drawPath(crown, Paint()..color = const Color(0xffffcf32));
+      canvas.drawCircle(
+        const Offset(20, -12),
+        2.2,
+        Paint()..color = const Color(0xffed568a),
+      );
+    }
+  }
+}
+
 class Player extends PositionComponent
     with CollisionCallbacks, HasGameRef<AnimalGame> {
   double velocityY = 0;
@@ -1605,11 +1923,22 @@ class Player extends PositionComponent
       RunnerKind.human => Colors.orange[200]!,
       RunnerKind.rabbit => const Color(0xfffff4ee),
       RunnerKind.cat => const Color(0xffa9b5c7),
+      RunnerKind.lion => const Color(0xffffcd65),
     };
     torsoPaint.color = shirt;
     armPaint.color = shirt;
     armAccentPaint.color = shirt;
     animalFeatures.removeAll(animalFeatures.children.toList());
+    if (kind == RunnerKind.lion) {
+      animalFeatures.add(_RoyalRegalia(shirt)..priority = -2);
+      animalFeatures.add(_LionMane()..priority = -1);
+      animalFeatures.add(_AnimalFace(lion: true));
+    } else if (kind == RunnerKind.cat) {
+      animalFeatures.add(_AnimalFace());
+    }
+    if (kind != RunnerKind.lion) {
+      animalFeatures.add(_Costume(gameRef.progress.outfit));
+    }
     if (kind != RunnerKind.human) {
       final rabbit = kind == RunnerKind.rabbit;
       for (final x in [9.0, 25.0]) {
@@ -1907,11 +2236,8 @@ class MoleObstacle extends PositionComponent
     Set<Vector2> intersectionPoints,
     PositionComponent other,
   ) {
-    if (other is Player) {
-      if (gameRef.isBreakerActive) {
-        removeFromParent();
-      } else if (gameRef.player.isInvincible ||
-          gameRef.player.shieldGrace > 0) {
+    if (other is Player && !isRemoving) {
+      if (gameRef.player.isInvincible || gameRef.player.shieldGrace > 0) {
         // 無敵中はそのまま通過
       } else if (gameRef.consumeShield()) {
         removeFromParent();
@@ -2593,11 +2919,8 @@ class Obstacle extends PositionComponent
     Set<Vector2> intersectionPoints,
     PositionComponent other,
   ) {
-    if (other is Player) {
-      if (gameRef.isBreakerActive) {
-        removeFromParent();
-      } else if (gameRef.player.isInvincible ||
-          gameRef.player.shieldGrace > 0) {
+    if (other is Player && !isRemoving) {
+      if (gameRef.player.isInvincible || gameRef.player.shieldGrace > 0) {
         // 無敵中はそのまま通過
       } else if (gameRef.consumeShield()) {
         removeFromParent();
