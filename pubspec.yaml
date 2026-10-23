@@ -27,7 +27,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/audio/bgm.mp3
+    - assets/audio/
 
 flutter_launcher_icons:
   android: true

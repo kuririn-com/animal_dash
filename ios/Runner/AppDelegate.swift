@@ -60,6 +60,18 @@ private final class AdFreeStore {
     try await Product.products(for: [Self.productID]).first
   }
 
+  private func japanesePrice(_ product: Product) -> String? {
+    // Never relabel a USD sandbox price as JPY. Use StoreKit's actual amount.
+    guard product.priceFormatStyle.currencyCode == "JPY" else { return nil }
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "ja_JP")
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = 0
+    guard let amount = formatter.string(from: product.price as NSDecimalNumber) else { return nil }
+    return "\(amount)円"
+  }
+
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) async {
     switch call.method {
     case "entitlement":
@@ -70,7 +82,16 @@ private final class AdFreeStore {
           result(["available": false])
           return
         }
-        result(["available": AppStore.canMakePayments, "price": product.displayPrice])
+        // StoreKit determines the currency from the Apple Account storefront.
+        // Review and Sandbox accounts may use another currency even for a Japan-only app.
+        var information: [String: Any] = [
+          "available": AppStore.canMakePayments,
+          "price": japanesePrice(product) ?? product.displayPrice,
+        ]
+        if product.priceFormatStyle.currencyCode != "JPY" {
+          information["message"] = "Apple Accountのストア国・地域に応じた価格です。日本向け販売価格は100円です。購入時はAppleの確認画面に表示される通貨・金額をご確認ください。"
+        }
+        result(information)
       } catch {
         result(FlutterError(code: "STORE_UNAVAILABLE", message: "商品情報を取得できません。", details: nil))
       }

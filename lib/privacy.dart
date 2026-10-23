@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 const privacyPolicyText = '''Animal Dash プライバシーポリシー
-更新日：2026年10月8日
+更新日：2026年10月16日
 
-Animal Dashは、ゲームの最高距離と最高コイン数を端末内に保存します。アカウントの作成は不要で、運営者がこれらの記録をサーバーに送信する機能はありません。
+Animal Dashは、ゲームの最高距離・最高コイン数、所持コイン・アイテム、解放済みキャラクター・衣装、選択中の見た目を端末内に保存します。コインとアイテムはゲーム内で獲得・交換するもので、現金で購入する機能はありません。アカウントの作成は不要で、運営者がこれらの記録をサーバーに送信する機能はありません。
 
 広告の配信にはGoogle AdMobを利用します。広告SDKは、広告配信、不正利用防止、広告効果の測定等のため、端末やアプリの識別情報、IPアドレスから推定されるおおよその位置、広告の表示・操作情報、診断・パフォーマンス情報等を取り扱う場合があります。広告の詳細はGoogleのプライバシーポリシー（https://policies.google.com/privacy）をご確認ください。
 
@@ -19,7 +19,8 @@ Instagramのお問い合わせでいただいた連絡情報や内容は、お�
 運営・お問い合わせ（Instagram）：https://www.instagram.com/r.ever_official/
 本ポリシーは、機能や利用サービスの変更等に応じて更新する場合があります。''';
 
-Future<void> showGamePrivacy(BuildContext context, {
+Future<void> showGamePrivacy(
+  BuildContext context, {
   required bool optionsRequired,
   required VoidCallback onConsentChanged,
 }) {
@@ -43,7 +44,10 @@ Future<void> showGamePrivacy(BuildContext context, {
             },
             child: const Text('広告の設定'),
           ),
-        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('閉じる')),
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('閉じる'),
+        ),
       ],
     ),
   );
