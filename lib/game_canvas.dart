@@ -12,10 +12,19 @@ class GameCanvas extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = max(900.0, 500 * constraints.maxWidth / constraints.maxHeight);
+        final width = max(
+          900.0,
+          500 * constraints.maxWidth / constraints.maxHeight,
+        );
         return FittedBox(
           fit: BoxFit.contain,
-          child: SizedBox(width: width, height: 500, child: child),
+          child: SizedBox(
+            width: width,
+            height: 500,
+            // Scenery and spawning objects can draw beyond their coordinates.
+            // Keep that paint out of the safe-area and letterbox margins.
+            child: ClipRect(child: child),
+          ),
         );
       },
     );
