@@ -5,13 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum Supply {
-  shield('バリア', '🛡', 15, '1回の衝突を防ぐ。重ねて使用できます'),
-  magnet('磁石', '🧲', 12, '7秒間コインを引き寄せます'),
-  star('無敵', '⭐', 25, '5秒間、障害物を通り抜けます'),
-  breaker('障害物クリア', '💥', 20, '5秒間、障害物を取り除きます'),
-  highJump('ハイジャンプ', '🪽', 12, '7秒間、高くジャンプできます'),
-  doubleCoin('コイン2倍', '💰', 18, '8秒間、取ったコインが2倍になります'),
-  speedReset('スピードリセット', '🐢', 10, '走る速度をスタート時に戻します');
+  shield('バリア', '🛡', 200, '1回の衝突を防ぐ。重ねて使用できます'),
+  magnet('磁石', '🧲', 50, '7秒間コインを引き寄せます'),
+  star('無敵', '⭐', 200, '5秒間、障害物を通り抜けます'),
+  breaker('障害物クリア', '💥', 100, '画面内の障害物を一度に消します'),
+  highJump('ハイジャンプ', '🪽', 50, '7秒間、高くジャンプできます'),
+  doubleCoin('コイン2倍', '💰', 100, '8秒間、取ったコインが2倍になります'),
+  speedReset('スピードリセット', '🐢', 50, '走る速度をスタート時に戻します');
 
   const Supply(this.label, this.icon, this.cost, this.description);
   final String label;
@@ -22,8 +22,9 @@ enum Supply {
 
 enum RunnerKind {
   human('ランナー', '🏃', 0),
-  rabbit('うさぎ', '🐰', 60),
-  cat('ねこ', '🐱', 80);
+  rabbit('うさぎ', '🐰', 200),
+  cat('ねこ', '🐱', 200),
+  lion('スペシャル：王冠ライオン', '🦁', 500);
 
   const RunnerKind(this.label, this.icon, this.cost);
   final String label;
@@ -33,13 +34,25 @@ enum RunnerKind {
 
 enum Outfit {
   red('レッド', 0),
-  blue('ブルー', 25),
-  green('グリーン', 25),
-  gold('ゴールド', 100);
+  blue('忍者', 500),
+  green('森のレンジャー', 500),
+  gold('黄金の勇者', 500);
 
   const Outfit(this.label, this.cost);
   final String label;
   final int cost;
+  String get icon => switch (this) {
+    red => '👕',
+    blue => '🥷',
+    green => '🏹',
+    gold => '🛡',
+  };
+  String get description => switch (this) {
+    red => '最初から使える基本の服',
+    blue => '頭巾と赤いなびくスカーフ',
+    green => '羽根付き帽子・マント・冒険ポーチ',
+    gold => '飾り付き兜・黄金の鎧・紋章の盾',
+  };
 }
 
 enum MusicTrack {
@@ -62,8 +75,6 @@ class GameProgress extends ChangeNotifier {
   int wallet = 0;
   RunnerKind runner = RunnerKind.human;
   Outfit outfit = Outfit.red;
-  MusicTrack music = MusicTrack.original;
-  double musicVolume = 0.65;
   final Map<Supply, int> _inventory = {};
   final Set<RunnerKind> _runners = {RunnerKind.human};
   final Set<Outfit> _outfits = {Outfit.red};
@@ -101,13 +112,6 @@ class GameProgress extends ChangeNotifier {
             outfit = value;
           }
         }
-        for (final value in MusicTrack.values) {
-          if (data['music'] == value.name) music = value;
-        }
-        musicVolume = ((data['volume'] as num?)?.toDouble() ?? 0.65).clamp(
-          0.0,
-          1.0,
-        );
       } catch (_) {
         // Preserve the original snapshot instead of silently overwriting it.
         saveError = '保存データを読み込めません。アプリを再起動してください。';
@@ -128,8 +132,6 @@ class GameProgress extends ChangeNotifier {
       'outfits': _outfits.map((v) => v.name).toList(),
       'runner': runner.name,
       'outfit': outfit.name,
-      'music': music.name,
-      'volume': musicVolume,
     });
     notifyListeners();
     return _writes = _writes.then((_) async {
@@ -184,18 +186,6 @@ class GameProgress extends ChangeNotifier {
     outfit = value;
     unawaited(_changed());
     return true;
-  }
-
-  void setMusic(MusicTrack value) {
-    if (!ready) return;
-    music = value;
-    unawaited(_changed());
-  }
-
-  void setVolume(double value) {
-    if (!ready) return;
-    musicVolume = value.clamp(0.0, 1.0);
-    unawaited(_changed());
   }
 
   Future<void> flush() => _writes;
