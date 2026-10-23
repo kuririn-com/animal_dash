@@ -1,9 +1,48 @@
 import 'package:animal_dash/ads.dart';
 import 'package:animal_dash/game_canvas.dart';
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('overflowing scenery cannot paint into the letterbox margin', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const boundaryKey = ValueKey('paint-boundary');
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: RepaintBoundary(
+          key: boundaryKey,
+          child: ColoredBox(
+            color: Colors.blue,
+            child: GameCanvas(
+              child: CustomPaint(painter: _OverflowingScenery()),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final boundary = tester.renderObject<RenderRepaintBoundary>(
+      find.byKey(boundaryKey),
+    );
+    await tester.runAsync(() async {
+      final image = await boundary.toImage();
+      final pixels = (await image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      ))!;
+      // The scene fills the center while the top letterbox retains its own color.
+      expect(pixels.getUint8((500 * image.width + 500) * 4), 244);
+      expect(pixels.getUint8((100 * image.width + 500) * 4), 33);
+      image.dispose();
+    });
+  });
   test('interstitial is due after three games and remains due until shown', () {
     final schedule = InterstitialSchedule();
     schedule.completeGame();
@@ -18,8 +57,14 @@ void main() {
     expect(schedule.isDue, isFalse);
   });
 
-  for (final screen in [const Size(568, 320), const Size(844, 390), const Size(1024, 768)]) {
-    testWidgets('full game remains visible with banner at $screen', (tester) async {
+  for (final screen in [
+    const Size(568, 320),
+    const Size(844, 390),
+    const Size(1024, 768),
+  ]) {
+    testWidgets('full game remains visible with banner at $screen', (
+      tester,
+    ) async {
       tester.view.physicalSize = screen;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -27,24 +72,44 @@ void main() {
       const canvasKey = ValueKey('logical-canvas');
       const bannerKey = ValueKey('banner-space');
       int taps = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: MediaQuery(
-          data: MediaQueryData(size: screen,
-            padding: const EdgeInsets.fromLTRB(44, 0, 44, 21)),
-          child: Scaffold(body: SafeArea(child: Column(children: [
-            Expanded(child: GameCanvas(child: GestureDetector(
-              key: canvasKey,
-              behavior: HitTestBehavior.opaque,
-              onTap: () => taps++,
-              child: const ColoredBox(color: Colors.lightGreen),
-            ))),
-            const SizedBox(key: bannerKey, height: 50, width: double.infinity),
-          ]))),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: screen,
+              padding: const EdgeInsets.fromLTRB(44, 0, 44, 21),
+            ),
+            child: Scaffold(
+              body: SafeArea(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: GameCanvas(
+                        child: GestureDetector(
+                          key: canvasKey,
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => taps++,
+                          child: const ColoredBox(color: Colors.lightGreen),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(
+                      key: bannerKey,
+                      height: 50,
+                      width: double.infinity,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-      ));
+      );
       final canvas = tester.renderObject<RenderBox>(find.byKey(canvasKey));
       final topLeft = canvas.localToGlobal(Offset.zero);
-      final bottomRight = canvas.localToGlobal(Offset(canvas.size.width, canvas.size.height));
+      final bottomRight = canvas.localToGlobal(
+        Offset(canvas.size.width, canvas.size.height),
+      );
       final banner = tester.getRect(find.byKey(bannerKey));
       expect(topLeft.dx, greaterThanOrEqualTo(44 - 0.01));
       expect(topLeft.dy, greaterThanOrEqualTo(0));
@@ -57,4 +122,18 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+}
+
+class _OverflowingScenery extends CustomPainter {
+  const _OverflowingScenery();
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      const Rect.fromLTRB(-500, -500, 1500, 1000),
+      Paint()..color = Colors.red,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
