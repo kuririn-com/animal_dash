@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'main.dart' show AnimalGame;
 import 'progress.dart';
-import 'scenery.dart';
 
 Future<void> showGameShop(
   BuildContext context,
@@ -13,7 +10,7 @@ Future<void> showGameShop(
 }) => showDialog<void>(
   context: context,
   builder: (context) => DefaultTabController(
-    length: 3,
+    length: 2,
     initialIndex: initialTab,
     child: Dialog(
       child: SizedBox(
@@ -53,7 +50,6 @@ Future<void> showGameShop(
                   tabs: [
                     Tab(text: 'コイン交換'),
                     Tab(text: 'キャラ・服'),
-                    Tab(text: 'BGM・背景'),
                   ],
                 ),
                 Expanded(
@@ -149,9 +145,11 @@ Future<void> showGameShop(
                             ListTile(
                               leading: CircleAvatar(
                                 backgroundColor: outfitColor(outfit),
-                                radius: 14,
+                                radius: 20,
+                                child: Text(outfit.icon),
                               ),
                               title: Text(outfit.label),
+                              subtitle: Text(outfit.description),
                               trailing: OutlinedButton(
                                 onPressed:
                                     progress.outfit == outfit ||
@@ -172,63 +170,6 @@ Future<void> showGameShop(
                                       : '${outfit.cost}コインで解放',
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
-                      ListView(
-                        padding: const EdgeInsets.all(16),
-                        children: [
-                          const Text(
-                            'BGMを選ぶ',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          for (final track in MusicTrack.values)
-                            ListTile(
-                              title: Text(track.label),
-                              trailing: progress.music == track
-                                  ? const Icon(
-                                      Icons.check_circle,
-                                      color: Colors.teal,
-                                    )
-                                  : null,
-                              onTap: () => unawaited(game.changeMusic(track)),
-                            ),
-                          Text(
-                            'BGM音量 ${(progress.musicVolume * 100).round()}%',
-                          ),
-                          Slider(
-                            value: progress.musicVolume,
-                            divisions: 10,
-                            label: '${(progress.musicVolume * 100).round()}%',
-                            onChanged: (v) =>
-                                unawaited(game.changeMusicVolume(v)),
-                          ),
-                          const Text(
-                            'iPhoneのマナーモード中は無音です。マナーモードを解除すると、本体の音量ボタンでも調整できます。',
-                          ),
-                          const Divider(),
-                          const Text(
-                            '背景はプレイごとに抽選',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Wrap(
-                            spacing: 8,
-                            children: [
-                              for (final weather in Weather.values)
-                                Chip(
-                                  label: Text(
-                                    '${weather.label} ${weather.weight}%${weather.rare ? " ・レア" : ""}',
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const Text(
-                            '雷は短い稲妻のみで、画面全体の点滅はありません。背景による当たり判定の変化はありません。',
-                          ),
-                          if (game.audioError != null)
-                            Text(
-                              game.audioError!,
-                              style: const TextStyle(color: Colors.deepOrange),
                             ),
                         ],
                       ),
