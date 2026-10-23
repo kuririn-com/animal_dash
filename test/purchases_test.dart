@@ -81,7 +81,7 @@ void main() {
   );
 
   test(
-    'non-JPY product response cannot show a stale price or start a purchase',
+    'unavailable product response cannot show a stale price or start a purchase',
     () async {
       await store.initialize();
       await store.loadProduct();
@@ -97,6 +97,29 @@ void main() {
       expect(store.message, contains('日本'));
       await store.purchase();
       expect(attemptedPurchase, isFalse);
+    },
+  );
+
+  test(
+    'other storefront currency remains actual and cannot grant ownership on cancel',
+    () async {
+      await store.initialize();
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'product') {
+          return {
+            'available': true,
+            'price': r'$0.49',
+            'message': 'Apple Accountのストア国・地域に応じた価格です。',
+          };
+        }
+        return {'status': 'cancelled', 'owned': false};
+      });
+      await store.loadProduct();
+      expect(store.price, r'$0.49');
+      expect(store.available, isTrue);
+      expect(store.owned, isFalse);
+      await store.purchase();
+      expect(store.owned, isFalse);
     },
   );
 
