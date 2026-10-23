@@ -49,10 +49,10 @@ void main() {
     await tester.tap(find.byTooltip('一時停止'));
     await tester.pump();
     final game = tester
-        .widget<GameWidget<app.AnimalGame>>(
+        .state<GameWidgetState<app.AnimalGame>>(
           find.byType(GameWidget<app.AnimalGame>),
         )
-        .game;
+        .currentGame;
     expect(game.state, app.GameState.paused);
     final pausedDistance = game.distance;
     await Future<void>.delayed(const Duration(milliseconds: 400));
