@@ -29,7 +29,7 @@ void main() {
     () async {
       final progress = GameProgress();
       await progress.load();
-      await progress.collect(40);
+      await progress.collect(410);
       expect(progress.exchange(Supply.shield), isTrue);
       expect(progress.exchange(Supply.shield), isTrue);
       expect(progress.count(Supply.shield), 2);
@@ -57,28 +57,39 @@ void main() {
     },
   );
 
-  test(
-    'unlocks charge once; selected appearance and audio survive restart',
-    () async {
-      final progress = GameProgress();
-      await progress.load();
-      await progress.collect(200);
-      expect(progress.selectRunner(RunnerKind.rabbit), isTrue);
-      expect(progress.selectOutfit(Outfit.blue), isTrue);
-      progress.selectRunner(RunnerKind.human);
-      progress.selectRunner(RunnerKind.rabbit);
-      progress.setMusic(MusicTrack.blossom);
-      progress.setVolume(.3);
-      await progress.flush();
-      final reloaded = GameProgress();
-      await reloaded.load();
-      expect(reloaded.wallet, 115);
-      expect(reloaded.runner, RunnerKind.rabbit);
-      expect(reloaded.outfit, Outfit.blue);
-      expect(reloaded.music, MusicTrack.blossom);
-      expect(reloaded.musicVolume, .3);
-    },
-  );
+  test('unlocks charge once; selected appearance survives restart', () async {
+    final progress = GameProgress();
+    await progress.load();
+    await progress.collect(900);
+    expect(progress.selectRunner(RunnerKind.rabbit), isTrue);
+    expect(progress.selectOutfit(Outfit.blue), isTrue);
+    progress.selectRunner(RunnerKind.human);
+    progress.selectRunner(RunnerKind.rabbit);
+    await progress.flush();
+    final reloaded = GameProgress();
+    await reloaded.load();
+    expect(reloaded.wallet, 200);
+    expect(reloaded.runner, RunnerKind.rabbit);
+    expect(reloaded.outfit, Outfit.blue);
+  });
+
+  test('special character needs 500 coins and remains unlocked after restart', () async {
+    final progress = GameProgress();
+    await progress.load();
+    await progress.collect(499);
+    expect(progress.selectRunner(RunnerKind.lion), isFalse);
+    expect(progress.wallet, 499);
+    await progress.collect(1);
+    expect(progress.selectRunner(RunnerKind.lion), isTrue);
+    expect(progress.wallet, 0);
+    await progress.flush();
+    final reloaded = GameProgress();
+    await reloaded.load();
+    expect(reloaded.runner, RunnerKind.lion);
+    reloaded.selectRunner(RunnerKind.human);
+    expect(reloaded.selectRunner(RunnerKind.lion), isTrue);
+    expect(reloaded.wallet, 0);
+  });
 
   test(
     'corrupt save cannot be overwritten by an exchange or a pickup',
@@ -179,9 +190,11 @@ void main() {
           home: Scaffold(body: TitleOverlay(game: game)),
         ),
       );
+      expect(find.text('BGM・背景の出現率'), findsNothing);
       await tester.tap(find.text('コイン交換・もちもの'));
       await tester.pumpAndSettle();
       expect(find.text('バリア　所持 0個'), findsOneWidget);
+      expect(find.text('BGM・背景'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('キャラ・服'));
       await tester.pumpAndSettle();
