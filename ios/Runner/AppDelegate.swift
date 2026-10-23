@@ -82,12 +82,16 @@ private final class AdFreeStore {
           result(["available": false])
           return
         }
-        guard let price = japanesePrice(product) else {
-          result(["available": false,
-                  "message": "日本円の商品価格を取得できません。Apple Account／Sandboxのストア国・地域が日本か確認してください。"])
-          return
+        // StoreKit determines the currency from the Apple Account storefront.
+        // Review and Sandbox accounts may use another currency even for a Japan-only app.
+        var information: [String: Any] = [
+          "available": AppStore.canMakePayments,
+          "price": japanesePrice(product) ?? product.displayPrice,
+        ]
+        if product.priceFormatStyle.currencyCode != "JPY" {
+          information["message"] = "Apple Accountのストア国・地域に応じた価格です。日本向け販売価格は100円です。購入時はAppleの確認画面に表示される通貨・金額をご確認ください。"
         }
-        result(["available": AppStore.canMakePayments, "price": price])
+        result(information)
       } catch {
         result(FlutterError(code: "STORE_UNAVAILABLE", message: "商品情報を取得できません。", details: nil))
       }
@@ -110,10 +114,6 @@ private final class AdFreeStore {
         }
         guard let product = try await product() else {
           result(FlutterError(code: "STORE_UNAVAILABLE", message: "現在購入できません。", details: nil))
-          return
-        }
-        guard japanesePrice(product) != nil else {
-          result(FlutterError(code: "STORE_REGION", message: "日本円の価格を取得できません。ストアの国・地域をご確認ください。", details: nil))
           return
         }
         switch try await product.purchase() {
